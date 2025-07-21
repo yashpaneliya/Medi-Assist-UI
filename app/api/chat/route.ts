@@ -5,13 +5,13 @@ export const maxDuration = 30
 
 export async function POST(req: Request) {
   try {
-    const { query, sessionId } = await req.json();
+    const { query, sessionId, img_base64 } = await req.json();
     const currentSessionId = sessionId || `int_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
     const apiRes = await fetch('https://mediassist-5eke.onrender.com/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(sessionId && { 'X-Interaction-ID': sessionId }) },
-      body: JSON.stringify({ query, session_id: currentSessionId }),
+      body: JSON.stringify({ query, session_id: currentSessionId, img_base64 }),
     });
 
     if (!apiRes.ok) throw new Error(`Backend error: ${apiRes.status}`);

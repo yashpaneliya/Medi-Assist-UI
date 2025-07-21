@@ -3,17 +3,18 @@
 import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
-import { Send, Bot, User } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card } from "@/components/ui/card"
+import { Send, Bot, User, X, Paperclip } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Moon, Sun } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 
 interface Message {
   id: string
   role: "user" | "assistant"
   content: string
+  images?: string[]
   timestamp: Date
 }
 
@@ -22,8 +23,10 @@ export default function ChatApp() {
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [selectedImages, setSelectedImages] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [isDarkMode, setIsDarkMode] = useState(false)
 
@@ -61,62 +64,115 @@ export default function ChatApp() {
     scrollToBottom()
   }, [messages])
 
+  // Handle file selection
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    if (files) {
+      Array.from(files).forEach((file) => {
+        if (file.type.startsWith("image/")) {
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            const base64 = e.target?.result as string
+            setSelectedImages((prev) => [...prev, base64])
+          }
+          reader.readAsDataURL(file)
+        }
+      })
+    }
+  }
+
+  // Handle paste events for images
+  const handlePaste = (event: React.ClipboardEvent) => {
+    const items = event.clipboardData?.items
+    if (items) {
+      Array.from(items).forEach((item) => {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile()
+          if (file) {
+            const reader = new FileReader()
+            reader.onload = (e) => {
+              const base64 = e.target?.result as string
+              setSelectedImages((prev) => [...prev, base64])
+            }
+            reader.readAsDataURL(file)
+          }
+        }
+      })
+    }
+  }
+
+  // Remove selected image
+  const removeImage = (index: number) => {
+    setSelectedImages((prev) => prev.filter((_, i) => i !== index))
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
-  
+    e.preventDefault()
+    if ((!input.trim() && selectedImages.length === 0) || isLoading) return
+
     const userMessage: Message = {
       id: `user_${Date.now()}`,
       role: "user",
-      content: input.trim(),
+      content: input.trim() || "Please analyze this prescription of drugs",
+      images: selectedImages.length > 0 ? [...selectedImages] : undefined,
       timestamp: new Date(),
-    };
-  
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
-    setIsLoading(true);
-  
+    }
+
+    setMessages((prev) => [...prev, userMessage])
+    setInput("")
+    setSelectedImages([])
+    setIsLoading(true)
+
     try {
+      var image_data = null;
+      if (userMessage.images && userMessage.images.length > 0) {
+        image_data = userMessage.images[0];
+      }
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: input.trim(), sessionId }),
-      });
-  
-      if (!response.ok) throw new Error("Failed to get response");
-  
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: input.trim() || "Please analyze this prescription of drugs", sessionId, img_base64: image_data}),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to get response")
+      }
+
+      // Get interaction ID from response headers
       const responseSessionId = response.headers.get("X-Interaction-ID");
       if (responseSessionId && !sessionId) {
         setSessionId(responseSessionId);
       }
-  
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No reader available");
-  
+
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error("No reader available")
+
       const assistantMessage: Message = {
         id: `assistant_${Date.now()}`,
         role: "assistant",
         content: "",
         timestamp: new Date(),
-      };
-  
+      }
+
       setMessages((prev) => [...prev, assistantMessage]);
-  
+
       const decoder = new TextDecoder();
       let assistantText = "";
-  
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
   
         assistantText += decoder.decode(value, { stream: true });
-  
+        setIsLoading(false);
         // Update the assistant message in place
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMessage.id ? { ...msg, content: assistantText } : msg
-          )
-        );
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id ? { ...msg, content: assistantText } : msg
+                )
+              );
       }
     } catch (error) {
       console.error("Error:", error);
@@ -125,7 +181,7 @@ export default function ChatApp() {
         {
           id: `error_${Date.now()}`,
           role: "assistant",
-          content: "Sorry, I encountered an error. Please try again.",
+          content: "Sorry, but I could not find any relevant information for your query at the moment. Please consult a medical professional for accurate advice.",
           timestamp: new Date(),
         },
       ]);
@@ -139,7 +195,7 @@ export default function ChatApp() {
   const startNewChat = () => {
     setMessages([])
     setSessionId(null)
-    inputRef.current?.focus()
+        inputRef.current?.focus()
   }
 
   return (
@@ -199,6 +255,21 @@ export default function ChatApp() {
                       : "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
                   }`}
                 >
+                  {/* Images */}
+                  {message.images && message.images.length > 0 && (
+                    <div className="mb-3 grid grid-cols-2 gap-2">
+                      {message.images.map((image, index) => (
+                        <img
+                          key={index}
+                          src={image || "/placeholder.svg"}
+                          alt={`Uploaded image ${index + 1}`}
+                          className="rounded-lg max-w-full h-auto max-h-48 object-cover"
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Text Content */}
                   {message.role === "user" ? (
                     <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                   ) : (
@@ -264,26 +335,70 @@ export default function ChatApp() {
       {/* Input Area */}
       <div className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 px-4 py-4">
         <div className="max-w-4xl mx-auto">
-            <form onSubmit={handleSubmit} className="flex space-x-3">
+          {/* Image Previews */}
+          {selectedImages.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {selectedImages.map((image, index) => (
+                <div key={index} className="relative">
+                  <img
+                    src={image || "/placeholder.svg"}
+                    alt={`Selected image ${index + 1}`}
+                    className="w-16 h-16 object-cover rounded-lg border border-gray-300 dark:border-gray-600"
+                  />
+                  <button
+                    onClick={() => removeImage(index)}
+                    className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="flex space-x-3">
             <div className="flex-1 relative">
               <Input
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Type your query here..."
+                onPaste={handlePaste}
+                placeholder="Type your message here or paste an image..."
                 disabled={isLoading}
-                className="pr-12 py-3 text-sm border-gray-300 dark:border-gray-600 focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                className="pr-20 py-3 text-sm border-gray-300 dark:border-gray-600 focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                 autoFocus
               />
+              <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex space-x-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-1 h-8 w-8"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
             <Button
               type="submit"
-              disabled={!input.trim() || isLoading}
+              disabled={(!input.trim() && selectedImages.length === 0) || isLoading}
               className="px-4 py-3 bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600"
             >
               <Send className="w-4 h-4" />
             </Button>
           </form>
+
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
             {sessionId ? `Interaction ID: ${sessionId}` : "New conversation"}
           </p>
