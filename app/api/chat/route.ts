@@ -1,6 +1,3 @@
-import { openai } from "@ai-sdk/openai"
-import { streamText } from "ai"
-
 export const maxDuration = 30
 
 export async function POST(req: Request) {
@@ -22,14 +19,25 @@ export async function POST(req: Request) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
+        const encoder = new TextEncoder();
         for (const char of text) {
           controller.enqueue(encoder.encode(char));
           await new Promise((r) => setTimeout(r, 10));
         }
+    
+        const heartbeatInterval = 10000; // every 10s
+        const totalDelay = 5 * 60 * 1000; // 5 minutes
+        const startTime = Date.now();
+    
+        while (Date.now() - startTime < totalDelay) {
+          controller.enqueue(encoder.encode(" "));
+          await new Promise((r) => setTimeout(r, heartbeatInterval));
+        }
+    
         controller.close();
       },
     });
-
+    
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
